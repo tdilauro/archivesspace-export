@@ -35,10 +35,12 @@ JSONModelObject.__getattr__ = __getattr_override__
 # http://aspace.library.jhu.edu:8080/resources/989#tree::archival_object_123452
 # http://aspace.library.jhu.edu:8089/repositories/3/archival_objects/123452
 # {{as_api_ep}}/repositories/{{as_repo_spcoll}}/archival_objects/123452
+# -f repository.uri,resource.uri,parent.uri,uri,date,level,title /repositories/3/archival_objects/123452
+# resource: /repositories/3/resources/989
 
-repo_num = 3
-ao_num = 123452
-base_ao_ref = '/repositories/{repo}/archival_objects/{ao}'.format(repo=repo_num, ao=ao_num)
+# repo_num = 3
+# ao_num = 123452
+# base_ao_ref = '/repositories/{repo}/archival_objects/{ao}'.format(repo=repo_num, ao=ao_num)
 
 
 
@@ -51,19 +53,19 @@ def main():
     parser.add_argument('refs', nargs='+', help='a list of object URIs')
     args = parser.parse_args()
     field_names = args.fields.split(',')
-    recursion_depth = args.depth if args.depth >= 0 else None
+    max_recursion_depth = args.depth if args.depth >= 0 else None
 
     #field_names = ['repository.uri', 'parent.uri', 'uri', 'date',  'level', 'ref_id', 'title']
     emit = partial(emitter3, field_names=field_names, field_sep=' <-> ',
                    get_values=partial(value_dict, templates=template_dict(field_names)))
-    record_generator = partial(recursive_depth_first_from, max_depth=recursion_depth)
+    record_generator = partial(recursive_depth_first_from, max_depth=max_recursion_depth)
 
     aspace = ASpace()
 
     for ref in args.refs:
         obj = aspace.from_uri(ref)
-        for record in do_process_with_objects(emit, record_generator(obj)):
-            print('record: {}'.format(record))
+        for values in do_process_with_objects(emit, record_generator(obj)):
+            print('depth: {} record: {}'.format(values['_depth'], {k: v for k, v in values.items() if k != '_depth'}))
 
 
 def do_process_with_objects(do_process, with_objects):
@@ -73,7 +75,8 @@ def do_process_with_objects(do_process, with_objects):
 
 
 def emitter3(obj, get_values=None, field_names=None, field_sep=','):
-    values = get_values(get_fields(obj))
+    values = get_values(get_fields(obj['record']))
+    values['_depth'] = obj['depth']
     row_string = field_sep.join([values[f] for f in field_names])
     # print(row_string)
     yield values
@@ -90,11 +93,13 @@ def value_dict(obj, templates=None):
 def recursive_depth_first_from(top, include_top=True, max_depth=None, _depth=0):
     '''generator - yield objects recursively, depth-first'''
     if include_top:
-        yield top
+        yield {'depth':_depth, 'record': top}
     if max_depth is None or _depth < max_depth:
         if top.jsonmodel_type in ['resource']:
-            top = top.tree
-        for child in top.children:
+            children = [child.record for child in top.tree.children]
+        else:
+            children = top.children
+        for child in children:
             # always include child objects (include_top=True)
             yield from recursive_depth_first_from(child, include_top=True, max_depth=max_depth, _depth=_depth + 1)
 
